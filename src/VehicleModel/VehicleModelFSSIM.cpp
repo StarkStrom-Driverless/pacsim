@@ -18,6 +18,9 @@ public:
         gearRatio = 12.0;
         nominalVoltageTS = 0.0;
         base_g_ = fssim_.getParam().inertia.g;
+
+        // Enable debug prints by default; can be disabled later if noisy
+        //fssim_.setDebug(true);
     }
 
     // Map existing YAML from pacsim or leave defaults if not present
@@ -87,7 +90,7 @@ public:
         double T_sum = in.FL + in.FR + in.RL + in.RR;
         double Fx_cmd = T_sum / std::max(1e-6, wheelRadius);
         const auto& p = fssim_.getParam();
-        fssim_dc_ = Fx_cmd / std::max(1e-6, p.driveTrain.cm1);
+        //fssim_dc_ = Fx_cmd / std::max(1e-6, p.driveTrain.cm1);
     }
     void setSteeringSetpointFront(double in) override {
         // Single-track: front steer equals input

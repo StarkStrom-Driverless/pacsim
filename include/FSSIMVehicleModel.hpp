@@ -1,4 +1,28 @@
-// Minimal standalone FSSIM vehicle dynamics model (vendored for pacsim)
+/*
+ * AMZ-Driverless
+ * Copyright (c) 2018 Authors:
+ *   - Juraj Kabzan <kabzanj@gmail.com>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+// Minimal standalone FSSIM vehicle dynamics model copied from FSSIM
 // Depends only on Eigen and yaml-cpp
 
 #pragma once
@@ -8,6 +32,8 @@
 #include <cmath>
 #include <string>
 #include <yaml-cpp/yaml.h>
+#include <iostream>
+#include <iomanip>
 
 // Convenience vector alias
 using Vec2 = Eigen::Vector2d;
@@ -23,16 +49,13 @@ public:
         Vec2   v{Vec2::Zero()};
         double r{0.0};
 
-        // Body-frame accelerations (unused placeholders for parity)
         Vec2   a{Vec2::Zero()};
-
-        double v_max{50.0};
 
         State operator*(double dt) const {
             State s;
             s.p   = dt * p; s.yaw = dt * yaw;
             s.v   = dt * v; s.r = dt * r;
-            s.a   = dt * a; s.v_max = v_max;
+            s.a   = dt * a; 
             return s;
         }
 
@@ -40,17 +63,16 @@ public:
             State s;
             s.p   = p + o.p; s.yaw = yaw + o.yaw;
             s.v   = v + o.v; s.r = r + o.r;
-            s.a   = a + o.a; s.v_max = v_max;
+            s.a   = a + o.a;
             return s;
         }
 
-        void validate() { v.x() = std::min(std::max(0.0, v.x()), v_max); }
+        void validate() { }
     };
 
     struct Input {
-        double dc{0.0};     // Throttle command (can be negative for braking)
+        double dc{0.0};     // Throttle command in [-1, 1]
         double delta{0.0};  // Steering angle [rad]
-        double v_max{50.0}; // Speed limiter for numerical stability
     };
 
     struct Param {
@@ -130,7 +152,8 @@ public:
     void setState(const State& s) { state_ = s; }
     const State& getState() const { return state_; }
 
-    void setSpeedLimit(double v_max) { input_.v_max = v_max; }
+
+    void setDebug(bool enabled) { debug_ = enabled; }
 
     // Integrates dynamics given dc (throttle), delta (steer), and time step dt [s]
     const State& step(double dc, double delta, double dt) {
@@ -155,10 +178,10 @@ public:
         const State x_dot = f(state_, input_, Fx, FyF_l + FyF_r, FyR_l + FyR_r, FyF_l, FyF_r);
         State x_next      = state_ + x_dot * dt;
         state_            = f_kin_correction(x_next, state_, input_, Fx, dt);
-        state_.v_max      = input_.v_max;
         state_.validate();
 
-        // Instantaneous body-frame acceleration from forces (not via numerical derivative)
+        // Instantaneous body-frame acceleration from forces (not via numerical derivative) (unused)
+        /// TODO(Ivo) This is AI slop, is it correct ?
         {
             const double m_lon  = param_.inertia.m + param_.driveTrain.m_lon_add;
             const double FyFtot = FyF_l + FyF_r;
@@ -168,6 +191,10 @@ public:
             const double ay     = ((std::cos(input_.delta) * FyFtot) + FyRtot) / param_.inertia.m - (x_prev.r * v_x);
             state_.a.x() = ax;
             state_.a.y() = ay;
+        }
+
+        if (debug_) {
+            debugPrint(x_prev, Fx, Fz_total, FyF_l, FyF_r, FyR_l, FyR_r, state_);
         }
         return state_;
     }
@@ -235,11 +262,8 @@ private:
         const double m_lon = param_.inertia.m + param_.driveTrain.m_lon_add;
 
         State dx{};
-        {
-            // World-frame position derivative from body-frame velocity via 2D rotation
-            Eigen::Rotation2D<double> R(x.yaw);
-            dx.p = R.toRotationMatrix() * x.v;
-        }
+        Eigen::Rotation2D<double> R(x.yaw);
+        dx.p = R.toRotationMatrix() * x.v;
         dx.yaw = x.r;
         dx.v.x() = (x.r * x.v.y()) + (Fx - std::sin(u.delta) * (FyF_tot)) / m_lon;
         dx.v.y() = ((std::cos(u.delta) * FyF_tot) + FyR_tot) / param_.inertia.m - (x.r * v_x);
@@ -247,7 +271,6 @@ private:
                   + std::sin(u.delta) * (FyF_l - FyF_r) * 0.5 * param_.kinematic.b_F)
                  - (FyR_tot * param_.kinematic.l_R)) / param_.inertia.I_z;
         dx.a.setZero();
-        dx.v_max = x.v_max;
         return dx;
     }
 
@@ -290,4 +313,44 @@ private:
     State state_{};
     Input input_{};
     double old_delta_{0.0};
+    bool debug_{false};
+
+    void debugPrint(const State& x_prev,
+                    double Fx,
+                    double Fz,
+                    double FyF_l,
+                    double FyF_r,
+                    double FyR_l,
+                    double FyR_r,
+                    const State& x_next) const {
+        auto fmt = std::fixed; // default fixed
+        std::cout << std::setprecision(4);
+        std::cout << "[FSSIM] step()" << std::endl;
+        std::cout << " input: " << std::endl;
+        std::cout << "  dc:    " << input_.dc << std::endl;
+        std::cout << "  delta: " << input_.delta << std::endl;
+        std::cout << " state (prev):" << std::endl;
+        std::cout << "  p.x:  " << x_prev.p.x() << std::endl;
+        std::cout << "  p.y:  " << x_prev.p.y() << std::endl;
+        std::cout << "  yaw:  " << x_prev.yaw << std::endl;
+        std::cout << "  v.x:  " << x_prev.v.x() << std::endl;
+        std::cout << "  v.y:  " << x_prev.v.y() << std::endl;
+        std::cout << "  r:    " << x_prev.r << std::endl;
+        std::cout << " forces:" << std::endl;
+        std::cout << "  Fz:   " << Fz << std::endl;
+        std::cout << "  Fx:   " << Fx << std::endl;
+        std::cout << "  FyF_l:" << FyF_l << std::endl;
+        std::cout << "  FyF_r:" << FyF_r << std::endl;
+        std::cout << "  FyR_l:" << FyR_l << std::endl;
+        std::cout << "  FyR_r:" << FyR_r << std::endl;
+        std::cout << " state (next):" << std::endl;
+        std::cout << "  p.x:  " << x_next.p.x() << std::endl;
+        std::cout << "  p.y:  " << x_next.p.y() << std::endl;
+        std::cout << "  yaw:  " << x_next.yaw << std::endl;
+        std::cout << "  v.x:  " << x_next.v.x() << std::endl;
+        std::cout << "  v.y:  " << x_next.v.y() << std::endl;
+        std::cout << "  r:    " << x_next.r << std::endl;
+        std::cout << "  a.x:  " << x_next.a.x() << std::endl;
+        std::cout << "  a.y:  " << x_next.a.y() << std::endl;
+    }
 };

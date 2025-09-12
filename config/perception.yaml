@@ -18,16 +18,16 @@ perception_sensors:
 
     detection:
       prob_min_dist: 0.99
-      prob_decrease_dist_linear: 0.01
-      prob_decrease_dist_quadratic: 0.00012
+      prob_decrease_dist_linear: 0.001
+      prob_decrease_dist_quadratic: 0.000012
       min_prob: 0.1
 
     classification:
-      max_dist: 15
+      max_dist: 30
       prob_min_dist: 0.99
-      prob_decrease_dist_linear: 0.01
-      prob_decrease_dist_quadratic: 0.000125
-      min_prob: 0.2 # 0.2 is equivalent to random guessing (5 classes)
+      prob_decrease_dist_linear: 0.001
+      prob_decrease_dist_quadratic: 0.0000125
+      min_prob: 0.02 # 0.2 is equivalent to random guessing (5 classes)
 
     noise:
       cartesian: #x, y, z
