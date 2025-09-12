@@ -29,7 +29,7 @@ vehicle_model:
     debug_print: false 
     velocity_controller:
       p: 0.1
-      i: 0.001
+      i: 0.000
       
     inertia:
       m:        190.0   # Weight of the Vehicle [kg]
