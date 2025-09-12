@@ -16,7 +16,7 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 
-#include "VehicleModel/VehicleModelBicycle.cpp"
+#include "VehicleModel/VehicleModelFSSIM.cpp"
 #include "configParser.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
@@ -217,7 +217,7 @@ int threadMainLoopFunc(std::shared_ptr<rclcpp::Node> node)
         {
             Wheels val = deadTimeWspdSetpoints.getOldest();
             model->setRpmSetpoints(val);
-        }
+        } 
         if (deadTimeMaxTorques.availableDeadTime(simTime))
         {
             Wheels val = deadTimeMaxTorques.getOldest();
@@ -661,7 +661,7 @@ int main(int argc, char** argv)
 
     jointStatePublisher = node->create_publisher<sensor_msgs::msg::JointState>("/joint_states", 3);
 
-    model = std::make_shared<VehicleModelBicycle>();
+    model = std::make_shared<VehicleModelFSSIM>();
     Config modelConfig(vehicle_model_config_path);
     auto configVehicleModel = modelConfig.getElement("vehicle_model");
     model->readConfig(configVehicleModel);

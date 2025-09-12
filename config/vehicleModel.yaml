@@ -7,8 +7,8 @@ vehicle_model:
       sf: 1.15
       sr: 1.15
     tire:
-      Blat: 9.63
-      Clat: -1.39
+      Blat: 11.63
+      Clat: -1.38
       Dlat: 1.6
       Elat: 1.0
     aero:
