@@ -8,86 +8,22 @@
 class VehicleModelFSSIM : public IVehicleModel {
 public:
     VehicleModelFSSIM() {
-        this->position = Eigen::Vector3d::Zero();
-        this->orientation = Eigen::Vector3d::Zero();
-        this->velocity = Eigen::Vector3d::Zero();
-        this->acceleration = Eigen::Vector3d::Zero();
-        this->angularVelocity = Eigen::Vector3d::Zero();
-        this->angularAcceleration = Eigen::Vector3d::Zero();
-
+        // Reasonable defaults (kept minimal)
         this->torques = {0.0, 0.0, 0.0, 0.0};
         this->steeringAngles = {0.0, 0.0, 0.0, 0.0};
         this->wheelOrientations = {0.0, 0.0, 0.0, 0.0};
         this->wheelspeeds = {0.0, 0.0, 0.0, 0.0};
 
-        // Reasonable defaults
         wheelRadius = 0.206;
         gearRatio = 12.0;
-        innerSteeringRatio = 1.0;
-        outerSteeringRatio = 1.0;
         nominalVoltageTS = 0.0;
+        base_g_ = fssim_.getParam().inertia.g;
     }
 
     // Map existing YAML from pacsim or leave defaults if not present
     bool readConfig(ConfigElement& config) override {
-        try {
-            auto cfg = config["simple_bicycle_model"];
-            // Map basic geometry to FSSIM parameters if present
-            double lr = fssim_.getParam().kinematic.l_R;
-            double lf = fssim_.getParam().kinematic.l_F;
-            double sf = fssim_.getParam().kinematic.b_F;
-            double sr = fssim_.getParam().kinematic.b_R;
-
-            cfg["kinematics"].getElement<double>(&lf, "lf");
-            cfg["kinematics"].getElement<double>(&lr, "lr");
-            cfg["kinematics"].getElement<double>(&sf, "sf");
-            cfg["kinematics"].getElement<double>(&sr, "sr");
-
-            // Update FSSIM parameters if provided
-            auto& p = fssim_.params();
-            p.kinematic.l = lf + lr;
-            p.kinematic.b_F = sf;
-            p.kinematic.b_R = sr;
-            p.kinematic.w_front = (p.kinematic.l > 1e-6) ? (lr / p.kinematic.l) : p.kinematic.w_front;
-
-            // Tire model mapping if present
-            double Blat = p.tire.B, Clat = p.tire.C, Dlat = p.tire.D, Elat = p.tire.E;
-            cfg["tire"].getElement<double>(&Blat, "Blat");
-            cfg["tire"].getElement<double>(&Clat, "Clat");
-            cfg["tire"].getElement<double>(&Dlat, "Dlat");
-            cfg["tire"].getElement<double>(&Elat, "Elat");
-            p.tire.tire_coefficient = 1.0;
-            p.tire.B = Blat;
-            p.tire.C = Clat;
-            p.tire.D = Dlat;
-            p.tire.E = Elat;
-
-            // Aero map: convert to FSSIM constants
-            double cla = 3.7, cda = 1.1, area = 1.1;
-            cfg["aero"].getElement<double>(&cla, "cla");
-            cfg["aero"].getElement<double>(&cda, "cda");
-            cfg["aero"].getElement<double>(&area, "aeroArea");
-            const double rho = 1.29;
-            p.aero.c_down = 0.5 * rho * area * cla; // maps F_down = c_down * v^2
-            p.aero.c_drag = 0.5 * rho * area * cda; // maps F_drag = c_drag * v^2
-
-            // Mass/inertia
-            cfg.getElement<double>(&p.inertia.m, "m");
-            cfg.getElement<double>(&p.inertia.I_z, "Izz");
-
-            // Drivetrain basics
-            cfg.getElement<double>(&wheelRadius, "wheelRadius");
-            cfg.getElement<double>(&gearRatio, "gearRatio");
-            cfg.getElement<double>(&innerSteeringRatio, "innerSteeringRatio");
-            cfg.getElement<double>(&outerSteeringRatio, "outerSteeringRatio");
-            cfg.getElement<double>(&nominalVoltageTS, "nominalVoltageTS");
-
-        // Derived params are recomputed internally when used
+        fsssim_.loadCarConfig(config);
         return true;
-        } catch (...) {
-            // If config structure doesn't match, keep defaults
-            return true;
-        }
     }
 
     // Getters
@@ -119,12 +55,14 @@ public:
         const double lr = p.kinematic.l_R;
         const double sf = p.kinematic.b_F;
         const double sr = p.kinematic.b_R;
-        Eigen::AngleAxisd yawAngle(this->orientation.z(), Eigen::Vector3d::UnitZ());
+        const auto& s = fssim_.getState();
+        Eigen::AngleAxisd yawAngle(s.yaw, Eigen::Vector3d::UnitZ());
         auto R = yawAngle.matrix();
-        Eigen::Vector3d FL = R * Eigen::Vector3d(lf, +sf * 0.5, 0.0) + this->position;
-        Eigen::Vector3d FR = R * Eigen::Vector3d(lf, -sf * 0.5, 0.0) + this->position;
-        Eigen::Vector3d RL = R * Eigen::Vector3d(-lr, +sr * 0.5, 0.0) + this->position;
-        Eigen::Vector3d RR = R * Eigen::Vector3d(-lr, -sr * 0.5, 0.0) + this->position;
+        Eigen::Vector3d base(s.p.x(), s.p.y(), 0.0);
+        Eigen::Vector3d FL = R * Eigen::Vector3d(lf, +sf * 0.5, 0.0) + base;
+        Eigen::Vector3d FR = R * Eigen::Vector3d(lf, -sf * 0.5, 0.0) + base;
+        Eigen::Vector3d RL = R * Eigen::Vector3d(-lr, +sr * 0.5, 0.0) + base;
+        Eigen::Vector3d RR = R * Eigen::Vector3d(-lr, -sr * 0.5, 0.0) + base;
         return {FL, FR, RL, RR};
     }
 
@@ -132,19 +70,26 @@ public:
     void setTorques(Wheels in) override { this->torques = in; }
     void setRpmSetpoints(Wheels in) override { this->rpmSetpoints = in; }
     void setMinTorques(Wheels in) override { this->minTorques = in; }
-    void setMaxTorques(Wheels in) override { this->maxTorques = in; }
+    void setMaxTorques(Wheels in) override {
+        this->maxTorques = in;
+        double T_sum = in.FL + in.FR + in.RL + in.RR;
+        double Fx_cmd = T_sum / std::max(1e-6, wheelRadius);
+        const auto& p = fssim_.getParam();
+        fssim_dc_ = Fx_cmd / std::max(1e-6, p.driveTrain.cm1);
+    }
     void setSteeringSetpointFront(double in) override {
-        // Map front steering command to symmetric front wheel angles and to FSSIM delta
-        double avgRatio = 0.5 * (innerSteeringRatio + outerSteeringRatio);
-        double delta = in * avgRatio;
+        // Single-track: front steer equals input
+        double delta = in;
         this->steeringAngles.FL = delta;
         this->steeringAngles.FR = delta;
         fssim_steer_ = delta;
     }
     void setSteeringSetpointRear(double) override { /* not supported */ }
     void setPowerGroundSetpoint(double in) override {
-        // Treat as throttle [0..1]
-        fssim_throttle_ = std::min(std::max(in, 0.0), 1.0);
+        // Interpret as gravity factor
+        gravityFactor_ = in;
+        auto& p = fssim_.params();
+        p.inertia.g = base_g_ * gravityFactor_;
     }
     void setPosition(Eigen::Vector3d position) override {
         this->position = position;
@@ -162,22 +107,21 @@ public:
 
     void forwardIntegrate(double dt, Wheels /*frictionCoefficients*/) override {
         // Save previous for finite-difference accelerations
-        const auto prev = fssim_.getState();
-        const double prev_r = prev.r;
-        const Vec2 prev_v = prev.v;
+        // If RPM target provided, PI control body vx to compute dc
+        if (std::abs(rpmSetpoints.FL) + std::abs(rpmSetpoints.FR) + std::abs(rpmSetpoints.RL)
+                + std::abs(rpmSetpoints.RR) > 1e-6) {
+            double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
+            double omega = rpm_avg * 2.0 * M_PI / 60.0;
+            double v_target = (omega * wheelRadius) / std::max(1e-6, gearRatio);
+            updateVelocityPI(v_target, dt);
+        }
 
-        const auto& s = fssim_.step(fssim_throttle_, fssim_steer_, dt);
+        // Save previous state for finite-difference getters
+        last_state_ = fssim_.getState();
 
-        // Update IVehicleModel state members
-        this->position = Eigen::Vector3d(s.p.x(), s.p.y(), 0.0);
-        this->orientation = Eigen::Vector3d(0.0, 0.0, s.yaw);
-        this->velocity = Eigen::Vector3d(s.v.x(), s.v.y(), 0.0);
-        this->angularVelocity = Eigen::Vector3d(0.0, 0.0, s.r);
+        const auto& s = fssim_.step(fssim_dc_, fssim_steer_, dt);
 
-        // Finite-difference accelerations in body frame
-        const Vec2 a_body = (s.v - prev_v) / std::max(1e-6, dt);
-        this->acceleration = Eigen::Vector3d(a_body.x(), a_body.y(), 0.0);
-        this->angularAcceleration = Eigen::Vector3d(0.0, 0.0, (s.r - prev_r) / std::max(1e-6, dt));
+        last_dt_ = dt;
 
         // Wheelspeeds: approximate from body x velocity and gear ratio
         double rpm = (s.v.x() / (wheelRadius * 2.0 * M_PI)) * 60.0 * gearRatio;
@@ -192,19 +136,35 @@ public:
     }
 
 private:
-    // Underlying model
+    // Helper: PI controller to compute dc for velocity tracking
+    void updateVelocityPI(double v_target, double dt) {
+        const auto& p = fssim_.getParam();
+        const auto& s = fssim_.getState();
+        double e = v_target - s.v.x();
+        vel_i_ += e * dt;
+        double a_des = vel_kp_ * e + vel_ki_ * vel_i_;
+        double m_lon = p.inertia.m + p.driveTrain.m_lon_add;
+        double Fx_des = m_lon * a_des;
+        double F_drag = p.aero.c_drag * s.v.x() * s.v.x();
+        double dc = (Fx_des + F_drag + p.driveTrain.cr0) / std::max(1e-6, p.driveTrain.cm1);
+        fssim_dc_ = std::max(-1.0, std::min(1.0, dc));
+    }
+
+    // Underlying model and state
     FSSIMVehicleModel fssim_{};
-    // Inputs
-    double fssim_throttle_{0.0};
+    double fssim_dc_{0.0};
     double fssim_steer_{0.0};
-    // Parameters needed for some interface methods
     double wheelRadius{0.206};
     double gearRatio{12.0};
-    double innerSteeringRatio{1.0};
-    double outerSteeringRatio{1.0};
     double nominalVoltageTS{0.0};
-
-    Wheels minTorques{0,0,0,0};
-    Wheels maxTorques{0,0,0,0};
-    Wheels rpmSetpoints{0,0,0,0};
+    double base_g_{9.81};
+    double gravityFactor_{1.0};
+    Wheels minTorques{ -0.0, -0.0, -0.0, -0.0 };
+    Wheels maxTorques{ 0.0, 0.0, 0.0, 0.0 };
+    Wheels rpmSetpoints{ 0.0, 0.0, 0.0, 0.0 };
+    FSSIMVehicleModel::State last_state_{};
+    double last_dt_{0.0};
+    double vel_kp_{1.0};
+    double vel_ki_{0.0};
+    double vel_i_{0.0};
 };

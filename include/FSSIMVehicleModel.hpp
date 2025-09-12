@@ -71,15 +71,14 @@ public:
 public:
     FSSIMVehicleModel() { finalizeDerivedParams(); }
 
-    explicit FSSIMVehicleModel(const std::string& car_yaml) {
-        loadCarConfig(car_yaml);
-        finalizeDerivedParams();
-    }
 
-    bool loadCarConfig(const std::string& car_yaml) {
-        YAML::Node cfg = YAML::LoadFile(car_yaml);
-        YAML::Node car = cfg["car"];
-        if (!car) return false;
+
+    bool loadCarConfig(const YAML::Node& cfg) {
+        YAML::Node car = cfg["fssim_model"];
+        if (!car) {
+            std::cout << "WARNING: Could not load YAML" << std::endl;
+            return false;
+        }
 
         // Inertia (only used fields)
         if (auto n = car["inertia"]) {
