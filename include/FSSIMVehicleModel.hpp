@@ -1,0 +1,282 @@
+// Minimal standalone FSSIM vehicle dynamics model (vendored for pacsim)
+// Depends only on Eigen and yaml-cpp
+
+#pragma once
+
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <cmath>
+#include <string>
+#include <yaml-cpp/yaml.h>
+
+// Convenience vector alias
+using Vec2 = Eigen::Vector2d;
+
+class FSSIMVehicleModel {
+public:
+    struct State {
+        // Position in world frame and orientation
+        Vec2   p{Vec2::Zero()};
+        double yaw{0.0};
+
+        // Body-frame velocities and yaw rate
+        Vec2   v{Vec2::Zero()};
+        double r{0.0};
+
+        // Body-frame accelerations (unused placeholders for parity)
+        Vec2   a{Vec2::Zero()};
+
+        double v_max{50.0};
+
+        State operator*(double dt) const {
+            State s;
+            s.p   = dt * p; s.yaw = dt * yaw;
+            s.v   = dt * v; s.r = dt * r;
+            s.a   = dt * a; s.v_max = v_max;
+            return s;
+        }
+
+        State operator+(const State& o) const {
+            State s;
+            s.p   = p + o.p; s.yaw = yaw + o.yaw;
+            s.v   = v + o.v; s.r = r + o.r;
+            s.a   = a + o.a; s.v_max = v_max;
+            return s;
+        }
+
+        void validate() { v.x() = std::min(std::max(0.0, v.x()), v_max); }
+    };
+
+    struct Input {
+        double dc{0.0};     // Throttle command (can be negative for braking)
+        double delta{0.0};  // Steering angle [rad]
+        double v_max{50.0}; // Speed limiter for numerical stability
+    };
+
+    struct Param {
+        struct Inertia { double m{190.0}, g{9.81}, I_z{110.0}; } inertia;
+        struct Kinematic {
+            double l{1.53};     // wheelbase
+            double b_F{1.22};   // front axle track width
+            double b_R{1.22};   // rear axle track width
+            double w_front{0.5};
+            double l_F{0.0};    // derived: l*(1-w_front)
+            double l_R{0.0};    // derived: l*w_front
+        } kinematic;
+        struct Tire { double tire_coefficient{1.0}, B{12.56}, C{-1.38}, D{1.60}, E{-0.58}; } tire;
+        struct Aero { double c_down{1.22*2.6*0.6}, c_drag{0.7*1.0*1.0}; } aero;
+        struct DriveTrain { double inertia{0.4}, r_dyn{0.231}, m_lon_add{0.0}, cm1{5000.0}, cr0{180.0}; int nm_wheels{4}; } driveTrain;
+    };
+
+public:
+    FSSIMVehicleModel() { finalizeDerivedParams(); }
+
+    explicit FSSIMVehicleModel(const std::string& car_yaml) {
+        loadCarConfig(car_yaml);
+        finalizeDerivedParams();
+    }
+
+    bool loadCarConfig(const std::string& car_yaml) {
+        YAML::Node cfg = YAML::LoadFile(car_yaml);
+        YAML::Node car = cfg["car"];
+        if (!car) return false;
+
+        // Inertia (only used fields)
+        if (auto n = car["inertia"]) {
+            param_.inertia.m        = n["m"].as<double>();
+            param_.inertia.g        = n["g"].as<double>();
+            param_.inertia.I_z      = n["I_z"].as<double>();
+        }
+
+        // Kinematics
+        if (auto n = car["kinematics"]) {
+            param_.kinematic.l       = n["l"].as<double>();
+            param_.kinematic.b_F     = n["b_F"].as<double>();
+            param_.kinematic.b_R     = n["b_R"].as<double>();
+            param_.kinematic.w_front = n["w_front"].as<double>();
+        }
+
+        // Tire (Magic Formula parameters)
+        if (auto n = car["tire"]) {
+            param_.tire.tire_coefficient = n["tire_coefficient"].as<double>();
+            param_.tire.B = n["B"].as<double>() / param_.tire.tire_coefficient;
+            param_.tire.C = n["C"].as<double>();
+            param_.tire.D = n["D"].as<double>() * param_.tire.tire_coefficient;
+            param_.tire.E = n["E"].as<double>();
+        }
+
+        // Aero
+        if (auto n = car["aero"]) {
+            param_.aero.c_down = n["C_Down"]["a"].as<double>() * n["C_Down"]["b"].as<double>() * n["C_Down"]["c"].as<double>();
+            param_.aero.c_drag = n["C_drag"]["a"].as<double>() * n["C_drag"]["b"].as<double>() * n["C_drag"]["c"].as<double>();
+        }
+
+        // Drivetrain
+        if (auto n = car["drivetrain"]) {
+            param_.driveTrain.cm1       = n["Cm1"].as<double>();
+            param_.driveTrain.cr0       = n["Cr0"].as<double>();
+            param_.driveTrain.inertia   = n["inertia"].as<double>();
+            param_.driveTrain.r_dyn     = n["r_dyn"].as<double>();
+            param_.driveTrain.nm_wheels = n["nm_wheels"].as<int>();
+        }
+
+        finalizeDerivedParams();
+        return true;
+    }
+
+    // Expose parameter reference for external configuration
+    Param& params() { return param_; }
+    const Param& getParam() const { return param_; }
+
+    void setState(const State& s) { state_ = s; }
+    const State& getState() const { return state_; }
+
+    void setSpeedLimit(double v_max) { input_.v_max = v_max; }
+
+    // Integrates dynamics given dc (throttle), delta (steer), and time step dt [s]
+    const State& step(double dc, double delta, double dt) {
+        // First-order steering actuator model (simple low-pass)
+        const double T_sample   = 0.1;
+        const double T_steering = 0.145;
+        input_.delta = (T_sample / (T_steering + T_sample)) * delta
+                     + (T_steering / (T_steering + T_sample)) * old_delta_;
+        old_delta_ = input_.delta;
+        input_.dc    = dc;
+
+        // Normal force incl. aero downforce
+        const double Fz_total = getNormalForce(state_);
+
+        // Lateral tire forces using bicycle model with split left/right
+        double FyF_l, FyF_r, FyR_l, FyR_r;
+        computeTireLateralForces(state_, input_, Fz_total, FyF_l, FyF_r, FyR_l, FyR_r);
+
+        const double Fx   = getFx(state_, input_);
+
+        const State x_dot = f(state_, input_, Fx, FyF_l + FyF_r, FyR_l + FyR_r, FyF_l, FyF_r);
+        State x_next      = state_ + x_dot * dt;
+        state_            = f_kin_correction(x_next, state_, input_, Fx, dt);
+        state_.v_max      = input_.v_max;
+        state_.validate();
+        return state_;
+    }
+
+private:
+    void finalizeDerivedParams() {
+        param_.kinematic.l_F   = param_.kinematic.l * (1.0 - param_.kinematic.w_front);
+        param_.kinematic.l_R   = param_.kinematic.l * param_.kinematic.w_front;
+        param_.driveTrain.m_lon_add = param_.driveTrain.nm_wheels * param_.driveTrain.inertia
+                                      / (param_.driveTrain.r_dyn * param_.driveTrain.r_dyn);
+    }
+
+    // Magic Formula lateral tire force
+    double pacejkaFy(double alpha, double Fz) const {
+        const double B = param_.tire.B;
+        const double C = param_.tire.C;
+        const double D = param_.tire.D;
+        const double E = param_.tire.E;
+        const double mu_y = D * std::sin(C * std::atan(B * (1.0 - E) * alpha + E * std::atan(B * alpha)));
+        return Fz * mu_y;
+    }
+
+    // Slip angles and lateral forces per wheel
+    void computeTireLateralForces(const State& x,
+                                  const Input& u,
+                                  double Fz_total,
+                                  double& FyF_l,
+                                  double& FyF_r,
+                                  double& FyR_l,
+                                  double& FyR_r) const {
+        const double v_x = std::max(1.0, x.v.x());
+
+        // Front axle geometry
+        const double l_F = param_.kinematic.l_F;
+        const double b_F = param_.kinematic.b_F;
+        // Rear axle geometry
+        const double l_R = param_.kinematic.l_R;
+        const double b_R = param_.kinematic.b_R;
+
+        // Slip angles (left/right) for front and rear
+        const double alphaF_l = std::atan((x.v.y() + (+1.0) * l_F * x.r) / (v_x - 0.5 * b_F * x.r)) - u.delta;
+        const double alphaF_r = std::atan((x.v.y() + (+1.0) * l_F * x.r) / (v_x + 0.5 * b_F * x.r)) - u.delta;
+        const double alphaR_l = std::atan((x.v.y() + (-1.0) * l_R * x.r) / (v_x - 0.5 * b_R * x.r));
+        const double alphaR_r = std::atan((x.v.y() + (-1.0) * l_R * x.r) / (v_x + 0.5 * b_R * x.r));
+
+        // Static load distribution to each wheel (includes 0.5 factor per wheel)
+        const double Fz_front_wheel = 0.5 * (param_.kinematic.w_front) * Fz_total;
+        const double Fz_rear_wheel  = 0.5 * (1.0 - param_.kinematic.w_front) * Fz_total;
+
+        FyF_l = pacejkaFy(alphaF_l, Fz_front_wheel);
+        FyF_r = pacejkaFy(alphaF_r, Fz_front_wheel);
+        FyR_l = pacejkaFy(alphaR_l, Fz_rear_wheel);
+        FyR_r = pacejkaFy(alphaR_r, Fz_rear_wheel);
+    }
+
+    // Continuous-time bicycle dynamics with split front lateral forces
+    State f(const State& x,
+            const Input& u,
+            double Fx,
+            double FyF_tot,
+            double FyR_tot,
+            double FyF_l,
+            double FyF_r) const {
+        const double v_x = std::max(0.0, x.v.x());
+        const double m_lon = param_.inertia.m + param_.driveTrain.m_lon_add;
+
+        State dx{};
+        {
+            // World-frame position derivative from body-frame velocity via 2D rotation
+            Eigen::Rotation2D<double> R(x.yaw);
+            dx.p = R.toRotationMatrix() * x.v;
+        }
+        dx.yaw = x.r;
+        dx.v.x() = (x.r * x.v.y()) + (Fx - std::sin(u.delta) * (FyF_tot)) / m_lon;
+        dx.v.y() = ((std::cos(u.delta) * FyF_tot) + FyR_tot) / param_.inertia.m - (x.r * v_x);
+        dx.r   = ((std::cos(u.delta) * FyF_tot * param_.kinematic.l_F
+                  + std::sin(u.delta) * (FyF_l - FyF_r) * 0.5 * param_.kinematic.b_F)
+                 - (FyR_tot * param_.kinematic.l_R)) / param_.inertia.I_z;
+        dx.a.setZero();
+        dx.v_max = x.v_max;
+        return dx;
+    }
+
+    // Low-speed kinematic correction and blending
+    State f_kin_correction(const State& x_in,
+                           const State& x_prev,
+                           const Input& u,
+                           double Fx,
+                           double dt) const {
+        State x = x_in;
+        const double v_x_dot = Fx / (param_.inertia.m + param_.driveTrain.m_lon_add);
+        const double v       = x_prev.v.norm();
+        const double v_blend = 0.5 * (v - 1.5);
+        const double blend   = std::max(0.0, std::min(1.0, v_blend));
+
+        x.v.x() = blend * x.v.x() + (1.0 - blend) * (x_prev.v.x() + dt * v_x_dot);
+
+        const double v_y_kin = std::tan(u.delta) * x.v.x() * param_.kinematic.l_R / param_.kinematic.l;
+        const double r_kin   = std::tan(u.delta) * x.v.x() / param_.kinematic.l;
+
+        x.v.y() = blend * x.v.y() + (1.0 - blend) * v_y_kin;
+        x.r   = blend * x.r   + (1.0 - blend) * r_kin;
+        return x;
+    }
+
+    // Aerodynamics + gravity normal force approximation
+    double getNormalForce(const State& x) const {
+        return param_.inertia.g * param_.inertia.m + param_.aero.c_down * x.v.x() * x.v.x();
+    }
+
+    // Longitudinal force from throttle minus drag and rolling resistance
+    double getFx(const State& x, const Input& u) const {
+        const double dc = (x.v.x() <= 0.0 && u.dc < 0.0) ? 0.0 : u.dc; // no reverse driving
+        const double F_drag = param_.aero.c_drag * x.v.x() * x.v.x();
+        return dc * param_.driveTrain.cm1 - F_drag - param_.driveTrain.cr0;
+    }
+
+private:
+    Param param_{};
+    State state_{};
+    Input input_{};
+    double old_delta_{0.0};
+};
+
