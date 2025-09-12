@@ -158,13 +158,10 @@ private:
         double e = v_target - s.v.x();
         
         vel_i_ += e * dt;
-        double a_des = vel_kp_ * e + vel_ki_ * vel_i_;
-        double m_lon = p.inertia.m + p.driveTrain.m_lon_add;
-        double Fx_des = m_lon * a_des;
-        double F_drag = p.aero.c_drag * s.v.x() * s.v.x();
-        double dc = (Fx_des + F_drag + p.driveTrain.cr0) / std::max(1e-6, p.driveTrain.cm1);
-        fssim_dc_ = std::max(-1.0, std::min(1.0, dc));
-        std::cout << "Velocity controller: v_target: " << v_target <<", v_current: " << s.v.x() << " dc: " << fssim_dc_ << std::endl;
+        double target_dc = vel_kp_ * e + vel_ki_ * vel_i_;
+        
+        fssim_dc_ = std::max(-1.0, std::min(1.0, target_dc));
+        std::cout << "Velocity controller: v_target: " << v_target <<", v_current: " << s.v.x() << " target_dc: " << target_dc << std::endl;
     }
 
     // Underlying model and state
