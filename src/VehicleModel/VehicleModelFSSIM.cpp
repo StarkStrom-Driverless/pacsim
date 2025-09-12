@@ -17,10 +17,7 @@ public:
         wheelRadius = 0.206;
         gearRatio = 12.0;
         nominalVoltageTS = 0.0;
-        base_g_ = fssim_.getParam().inertia.g;
-
-        // Enable debug prints by default; can be disabled later if noisy
-        //fssim_.setDebug(true);
+        base_g_ = fssim_.getParam().inertia.g;        
     }
 
     // Map existing YAML from pacsim or leave defaults if not present
@@ -85,12 +82,8 @@ public:
     void setTorques(Wheels in) override { this->torques = in; }
     void setRpmSetpoints(Wheels in) override { this->rpmSetpoints = in; }
     void setMinTorques(Wheels in) override { this->minTorques = in; }
-    void setMaxTorques(Wheels in) override {
-        this->maxTorques = in;
-        double T_sum = in.FL + in.FR + in.RL + in.RR;
-        double Fx_cmd = T_sum / std::max(1e-6, wheelRadius);
-        const auto& p = fssim_.getParam();
-        //fssim_dc_ = Fx_cmd / std::max(1e-6, p.driveTrain.cm1);
+
+    void setMaxTorques(Wheels) override {   
     }
     void setSteeringSetpointFront(double in) override {
         // Single-track: front steer equals input
@@ -104,7 +97,7 @@ public:
         // Interpret as gravity factor
         gravityFactor_ = in;
         auto& p = fssim_.params();
-        p.inertia.g = base_g_ * gravityFactor_;
+        //p.inertia.g = base_g_ * gravityFactor_;
     }
     void setPosition(Eigen::Vector3d position) override {
         this->position = position;
@@ -151,17 +144,20 @@ public:
     }
 
 private:
-    // Helper: PI controller to compute dc for velocity tracking
+    // Simple PI controller to compute driver command based on target velocity
     void updateVelocityPI(double v_target, double dt) {
-        const auto& p = fssim_.getParam();
-        const auto& s = fssim_.getState();
-        double e = v_target - s.v.x();
-        
-        vel_i_ += e * dt;
-        double target_dc = vel_kp_ * e + vel_ki_ * vel_i_;
-        
+        auto params = fssim_.getParam();
+        const auto& state = fssim_.getState();
+        auto v_current = state.v.x();
+        double error = v_target - v_current;
+
+        vel_i_ += error * dt;
+        auto p_anteil = params.velocity_controller.p * error;
+        auto i_anteil =  params.velocity_controller.i * vel_i_;
+        double target_dc = p_anteil + i_anteil;
         fssim_dc_ = std::max(-1.0, std::min(1.0, target_dc));
-        std::cout << "Velocity controller: v_target: " << v_target <<", v_current: " << s.v.x() << " target_dc: " << target_dc << std::endl;
+        std::cout << "Velocity controller: error: " << error <<  "target_dc: " << target_dc 
+            << ", p_anteil: " <<p_anteil << ", i_anteil: " << i_anteil << std::endl;
     }
 
     // Underlying model and state
@@ -178,7 +174,7 @@ private:
     Wheels rpmSetpoints{ 0.0, 0.0, 0.0, 0.0 };
     FSSIMVehicleModel::State last_state_{};
     double last_dt_{0.0};
-    double vel_kp_{1.0};
-    double vel_ki_{0.0};
+    
+    
     double vel_i_{0.0};
 };

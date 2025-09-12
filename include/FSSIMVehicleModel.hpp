@@ -88,6 +88,7 @@ public:
         struct Tire { double tire_coefficient{1.0}, B{12.56}, C{-1.38}, D{1.60}, E{-0.58}; } tire;
         struct Aero { double c_down{1.22*2.6*0.6}, c_drag{0.7*1.0*1.0}; } aero;
         struct DriveTrain { double inertia{0.4}, r_dyn{0.231}, m_lon_add{0.0}, cm1{5000.0}, cr0{180.0}; int nm_wheels{4}; } driveTrain;
+        struct VelocityController { double p{.1}, i{.1};} velocity_controller;
     };
 
 public:
@@ -102,6 +103,7 @@ public:
             return false;
         }
 
+        debug_ = car["debug_print"].as<bool>();
         // Inertia (only used fields)
         if (auto n = car["inertia"]) {
             param_.inertia.m        = n["m"].as<double>();
@@ -139,6 +141,10 @@ public:
             param_.driveTrain.inertia   = n["inertia"].as<double>();
             param_.driveTrain.r_dyn     = n["r_dyn"].as<double>();
             param_.driveTrain.nm_wheels = n["nm_wheels"].as<int>();
+        }
+        if (auto n = car["velocity_controller"]) {
+            param_.velocity_controller.p       = n["p"].as<double>();
+            param_.velocity_controller.i       = n["i"].as<double>();
         }
 
         finalizeDerivedParams();
@@ -303,9 +309,14 @@ private:
 
     // Longitudinal force from throttle minus drag and rolling resistance
     double getFx(const State& x, const Input& u) const {
-        const double dc = (x.v.x() <= 0.0 && u.dc < 0.0) ? 0.0 : u.dc; // no reverse driving
-        const double F_drag = param_.aero.c_drag * x.v.x() * x.v.x();
-        return dc * param_.driveTrain.cm1 - F_drag - param_.driveTrain.cr0;
+        double F_drag = param_.aero.c_drag * x.v.x() * x.v.x();
+        if(std::abs(F_drag) < 0.1) 
+            F_drag = 0;
+        
+        auto rollwiderstand = param_.driveTrain.cr0;
+        if(x.v.x() < 0.05)  
+            rollwiderstand = 0;
+        return dc * param_.driveTrain.cm1 - F_drag - rollwiderstand;
     }
 
 private:
@@ -323,7 +334,7 @@ private:
                     double FyR_l,
                     double FyR_r,
                     const State& x_next) const {
-        auto fmt = std::fixed; // default fixed
+
         std::cout << std::setprecision(4);
         std::cout << "[FSSIM] step()" << std::endl;
         std::cout << " input: " << std::endl;

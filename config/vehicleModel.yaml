@@ -26,6 +26,11 @@ vehicle_model:
     powertrainEfficiency: 0.95
 
   fssim_model:
+    debug_print: false 
+    velocity_controller:
+      p: 0.1
+      i: 0.001
+      
     inertia:
       m:        190.0   # Weight of the Vehicle [kg]
       m_driver: 0.0     # Weight of the driver  [kg]
