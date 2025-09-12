@@ -316,7 +316,7 @@ private:
         auto rollwiderstand = param_.driveTrain.cr0;
         if(x.v.x() < 0.05)  
             rollwiderstand = 0;
-        return dc * param_.driveTrain.cm1 - F_drag - rollwiderstand;
+        return u.dc * param_.driveTrain.cm1 - F_drag - rollwiderstand;
     }
 
 private:
