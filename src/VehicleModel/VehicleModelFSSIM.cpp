@@ -22,25 +22,37 @@ public:
 
     // Map existing YAML from pacsim or leave defaults if not present
     bool readConfig(ConfigElement& config) override {
-        fsssim_.loadCarConfig(config);
+        fssim_.loadCarConfig(config.getNode());
         return true;
     }
 
     // Getters
     Eigen::Vector3d getPosition() override {
         const auto& s = fssim_.getState();
-        this->position = Eigen::Vector3d(s.p.x(), s.p.y(), 0.0);
-        return this->position;
+        return Eigen::Vector3d(s.p.x(), s.p.y(), 0.0);
     }
     Eigen::Vector3d getOrientation() override {
         const auto& s = fssim_.getState();
-        this->orientation = Eigen::Vector3d(0.0, 0.0, s.yaw);
-        return this->orientation;
+        return Eigen::Vector3d(0.0, 0.0, s.yaw);
     }
-    Eigen::Vector3d getAngularVelocity() override { return this->angularVelocity; }
-    Eigen::Vector3d getAngularAcceleration() override { return this->angularAcceleration; }
-    Eigen::Vector3d getVelocity() override { return this->velocity; }
-    Eigen::Vector3d getAcceleration() override { return this->acceleration; }
+    Eigen::Vector3d getAngularVelocity() override {
+        const auto& s = fssim_.getState();
+        return Eigen::Vector3d(0.0, 0.0, s.r);
+    }
+    Eigen::Vector3d getAngularAcceleration() override {
+        if (last_dt_ <= 0.0) return Eigen::Vector3d::Zero();
+        const auto& s = fssim_.getState();
+        double rdot = (s.r - last_state_.r) / last_dt_;
+        return Eigen::Vector3d(0.0, 0.0, rdot);
+    }
+    Eigen::Vector3d getVelocity() override {
+        const auto& s = fssim_.getState();
+        return Eigen::Vector3d(s.v.x(), s.v.y(), 0.0);
+    }
+    Eigen::Vector3d getAcceleration() override {
+        const auto& s = fssim_.getState();
+        return Eigen::Vector3d(s.a.x(), s.a.y(), 0.0);
+    }
     Wheels getSteeringAngles() override { return this->steeringAngles; }
     Wheels getWheelspeeds() override { return this->wheelspeeds; }
     Wheels getTorques() override { return this->torques; }
@@ -141,6 +153,7 @@ private:
         const auto& p = fssim_.getParam();
         const auto& s = fssim_.getState();
         double e = v_target - s.v.x();
+        
         vel_i_ += e * dt;
         double a_des = vel_kp_ * e + vel_ki_ * vel_i_;
         double m_lon = p.inertia.m + p.driveTrain.m_lon_add;
@@ -148,6 +161,7 @@ private:
         double F_drag = p.aero.c_drag * s.v.x() * s.v.x();
         double dc = (Fx_des + F_drag + p.driveTrain.cr0) / std::max(1e-6, p.driveTrain.cm1);
         fssim_dc_ = std::max(-1.0, std::min(1.0, dc));
+        std::cout << "Velocity controller: v_target: " << v_target <<", v_current: " << s.v.x() << " dc: " << fssim_dc_ << std::endl;
     }
 
     // Underlying model and state

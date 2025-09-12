@@ -143,19 +143,32 @@ public:
         input_.dc    = dc;
 
         // Normal force incl. aero downforce
-        const double Fz_total = getNormalForce(state_);
+        const State  x_prev   = state_;
+        const double Fz_total = getNormalForce(x_prev);
 
         // Lateral tire forces using bicycle model with split left/right
         double FyF_l, FyF_r, FyR_l, FyR_r;
-        computeTireLateralForces(state_, input_, Fz_total, FyF_l, FyF_r, FyR_l, FyR_r);
+        computeTireLateralForces(x_prev, input_, Fz_total, FyF_l, FyF_r, FyR_l, FyR_r);
 
-        const double Fx   = getFx(state_, input_);
+        const double Fx   = getFx(x_prev, input_);
 
         const State x_dot = f(state_, input_, Fx, FyF_l + FyF_r, FyR_l + FyR_r, FyF_l, FyF_r);
         State x_next      = state_ + x_dot * dt;
         state_            = f_kin_correction(x_next, state_, input_, Fx, dt);
         state_.v_max      = input_.v_max;
         state_.validate();
+
+        // Instantaneous body-frame acceleration from forces (not via numerical derivative)
+        {
+            const double m_lon  = param_.inertia.m + param_.driveTrain.m_lon_add;
+            const double FyFtot = FyF_l + FyF_r;
+            const double FyRtot = FyR_l + FyR_r;
+            const double v_x    = std::max(0.0, x_prev.v.x());
+            const double ax     = (x_prev.r * x_prev.v.y()) + (Fx - std::sin(input_.delta) * (FyFtot)) / m_lon;
+            const double ay     = ((std::cos(input_.delta) * FyFtot) + FyRtot) / param_.inertia.m - (x_prev.r * v_x);
+            state_.a.x() = ax;
+            state_.a.y() = ay;
+        }
         return state_;
     }
 
@@ -278,4 +291,3 @@ private:
     Input input_{};
     double old_delta_{0.0};
 };
-
