@@ -156,8 +156,7 @@ private:
         auto i_anteil =  params.velocity_controller.i * vel_i_;
         double target_dc = p_anteil + i_anteil;
         fssim_dc_ = std::max(-1.0, std::min(1.0, target_dc));
-        std::cout << "Velocity controller: error: " << error <<  "target_dc: " << target_dc 
-            << ", p_anteil: " <<p_anteil << ", i_anteil: " << i_anteil << std::endl;
+        //std::cout << "Velocity controller: error: " << error <<  "target_dc: " << target_dc   << ", p_anteil: " <<p_anteil << ", i_anteil: " << i_anteil << std::endl;
     }
 
     // Underlying model and state
