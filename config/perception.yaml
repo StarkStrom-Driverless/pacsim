@@ -18,15 +18,15 @@ perception_sensors:
 
     detection:
       prob_min_dist: 0.99
-      prob_decrease_dist_linear: 0.001
-      prob_decrease_dist_quadratic: 0.000012
+      prob_decrease_dist_linear: 0.000001
+      prob_decrease_dist_quadratic: 0.0000012
       min_prob: 0.1
 
     classification:
-      max_dist: 30
-      prob_min_dist: 0.99
-      prob_decrease_dist_linear: 0.001
-      prob_decrease_dist_quadratic: 0.0000125
+      max_dist: 50
+      prob_min_dist: 0.999
+      prob_decrease_dist_linear: 0.0000001
+      prob_decrease_dist_quadratic: 0.0000000125
       min_prob: 0.02 # 0.2 is equivalent to random guessing (5 classes)
 
     noise:
@@ -68,8 +68,8 @@ perception_sensors:
     classification:
       max_dist: 15
       prob_min_dist: 0.99
-      prob_decrease_dist_linear: 0.01
-      prob_decrease_dist_quadratic: 0.000125
+      prob_decrease_dist_linear: 0.00001
+      prob_decrease_dist_quadratic: 0.00000125
       min_prob: 0.2 # 0.2 is equivalent to random guessing (5 classes)
 
     noise:
@@ -111,8 +111,8 @@ perception_sensors:
     classification:
       max_dist: 15
       prob_min_dist: 0.99
-      prob_decrease_dist_linear: 0.01
-      prob_decrease_dist_quadratic: 0.000125
+      prob_decrease_dist_linear: 0.00001
+      prob_decrease_dist_quadratic: 0.000000125
       min_prob: 0.2 # 0.2 is equivalent to random guessing (5 classes)
 
     noise:
