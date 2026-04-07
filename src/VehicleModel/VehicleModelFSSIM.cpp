@@ -116,13 +116,10 @@ public:
     void forwardIntegrate(double dt, Wheels /*frictionCoefficients*/) override {
         // Save previous for finite-difference accelerations
         // If RPM target provided, PI control body vx to compute dc
-        if (std::abs(rpmSetpoints.FL) + std::abs(rpmSetpoints.FR) + std::abs(rpmSetpoints.RL)
-                + std::abs(rpmSetpoints.RR) > 1e-6) {
-            double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
-            double omega = rpm_avg * 2.0 * M_PI / 60.0;
-            double v_target = (omega * wheelRadius) / std::max(1e-6, gearRatio);
-            updateVelocityPI(v_target, dt);
-        }
+        double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
+        double omega = rpm_avg * 2.0 * M_PI / 60.0;
+        double v_target = (omega * wheelRadius) / std::max(1e-6, gearRatio);
+        updateVelocityPI(v_target, dt);
 
         // Save previous state for finite-difference getters
         last_state_ = fssim_.getState();
@@ -156,7 +153,7 @@ private:
         auto i_anteil =  params.velocity_controller.i * vel_i_;
         double target_dc = p_anteil + i_anteil;
         fssim_dc_ = std::max(-1.0, std::min(1.0, target_dc));
-        //std::cout << "Velocity controller: error: " << error <<  "target_dc: " << target_dc   << ", p_anteil: " <<p_anteil << ", i_anteil: " << i_anteil << std::endl;
+        //std::cout << "Velocity controller: target: " << v_target << ", error: " << error <<  "target_dc: " << target_dc   << ", p_anteil: " <<p_anteil << ", i_anteil: " << i_anteil << std::endl;
     }
 
     // Underlying model and state
