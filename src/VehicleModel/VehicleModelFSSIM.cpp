@@ -83,8 +83,7 @@ public:
     void setRpmSetpoints(Wheels in) override { this->rpmSetpoints = in; }
     void setMinTorques(Wheels in) override { this->minTorques = in; }
 
-    void setMaxTorques(Wheels) override {   
-    }
+    void setMaxTorques(Wheels in) override { this->maxTorques = in; }
     void setSteeringSetpointFront(double in) override {
         // Single-track: front steer equals input
         double delta = in;
@@ -115,11 +114,18 @@ public:
 
     void forwardIntegrate(double dt, Wheels /*frictionCoefficients*/) override {
         // Save previous for finite-difference accelerations
-        // If RPM target provided, PI control body vx to compute dc
-        double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
-        double omega = rpm_avg * 2.0 * M_PI / 60.0;
-        double v_target = (omega * wheelRadius) / std::max(1e-6, gearRatio);
-        updateVelocityPI(v_target, dt);
+        const double total_max_torque = maxTorques.FL + maxTorques.FR + maxTorques.RL + maxTorques.RR;
+        if (std::abs(total_max_torque) > 1e-6) {
+            const auto params = fssim_.getParam();
+            const double target_force = gearRatio * total_max_torque / std::max(1e-6, wheelRadius);
+            fssim_dc_ = std::clamp(target_force / std::max(1e-6, params.driveTrain.cm1), -1.0, 1.0);
+        } else {
+            // If RPM target provided, PI control body vx to compute dc
+            double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
+            double omega = rpm_avg * 2.0 * M_PI / 60.0;
+            double v_target = (omega * wheelRadius) / std::max(1e-6, gearRatio);
+            updateVelocityPI(v_target, dt);
+        }
 
         // Save previous state for finite-difference getters
         last_state_ = fssim_.getState();
