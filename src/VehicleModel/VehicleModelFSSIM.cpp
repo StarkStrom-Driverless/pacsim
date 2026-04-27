@@ -4,6 +4,10 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+constexpr double kCmdEps = 1e-6;
+}
+
 // Wrapper implementing IVehicleModel using the FSSIMVehicleModel via composition
 class VehicleModelFSSIM : public IVehicleModel {
 public:
@@ -93,10 +97,9 @@ public:
     }
     void setSteeringSetpointRear(double) override { /* not supported */ }
     void setPowerGroundSetpoint(double in) override {
-        // Interpret as gravity factor
-        gravityFactor_ = in;
-        auto& p = fssim_.params();
-        //p.inertia.g = base_g_ * gravityFactor_;
+        // Interpret command as longitudinal force in Newton from upstream controller.
+        targetLongitudinalForceN_ = in;
+        hasLongitudinalForceCommand_ = true;
     }
     void setPosition(Eigen::Vector3d position) override {
         this->position = position;
@@ -114,16 +117,35 @@ public:
 
     void forwardIntegrate(double dt, Wheels /*frictionCoefficients*/) override {
         // Save previous for finite-difference accelerations
+        const auto params = fssim_.getParam();
         const double total_max_torque = maxTorques.FL + maxTorques.FR + maxTorques.RL + maxTorques.RR;
-        if (std::abs(total_max_torque) > 1e-6) {
-            const auto params = fssim_.getParam();
-            const double target_force = gearRatio * total_max_torque / std::max(1e-6, wheelRadius);
-            fssim_dc_ = std::clamp(target_force / std::max(1e-6, params.driveTrain.cm1), -1.0, 1.0);
-        } else {
-            // If RPM target provided, PI control body vx to compute dc
+        const bool use_force_command = hasLongitudinalForceCommand_;
+
+        if (use_force_command) {
+            // Map force command in N to drivetrain command input.
+            fssim_dc_ = std::clamp(
+                targetLongitudinalForceN_ / std::max(kCmdEps, params.driveTrain.cm1), -1.0, 1.0);
+
+            // Optional safety: if an MPC target velocity is provided via rpm setpoints,
+            // do not keep accelerating once we are above that target.
             double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
             double omega = rpm_avg * 2.0 * M_PI / 60.0;
-            double v_target = (omega * wheelRadius) / std::max(1e-6, gearRatio);
+            double v_target = (omega * wheelRadius) / std::max(kCmdEps, gearRatio);
+            if (v_target > kCmdEps) {
+                const double v_current = fssim_.getState().v.x();
+                if (v_current > v_target && fssim_dc_ > 0.0) {
+                    fssim_dc_ = 0.0;
+                }
+            }
+        } else if (std::abs(total_max_torque) > kCmdEps) {
+            // Backward compatibility: legacy torque path.
+            const double target_force = gearRatio * total_max_torque / std::max(kCmdEps, wheelRadius);
+            fssim_dc_ = std::clamp(target_force / std::max(kCmdEps, params.driveTrain.cm1), -1.0, 1.0);
+        } else {
+            // Velocity path: use wheel speed setpoint as target body velocity.
+            double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
+            double omega = rpm_avg * 2.0 * M_PI / 60.0;
+            double v_target = (omega * wheelRadius) / std::max(kCmdEps, gearRatio);
             updateVelocityPI(v_target, dt);
         }
 
@@ -171,6 +193,8 @@ private:
     double nominalVoltageTS{0.0};
     double base_g_{9.81};
     double gravityFactor_{1.0};
+    double targetLongitudinalForceN_{0.0};
+    bool hasLongitudinalForceCommand_{false};
     Wheels minTorques{ -0.0, -0.0, -0.0, -0.0 };
     Wheels maxTorques{ 0.0, 0.0, 0.0, 0.0 };
     Wheels rpmSetpoints{ 0.0, 0.0, 0.0, 0.0 };
