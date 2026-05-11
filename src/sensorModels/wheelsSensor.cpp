@@ -15,7 +15,7 @@ void WheelsSensor::readConfig(ConfigElement& config)
     config["error"].getElement<double>(&this->error_sigma, "sigma");
 }
 
-bool WheelsSensor::RunTick(Wheels& in, Eigen::Vector3d& trans, Eigen::Vector3d& rot, double time)
+bool WheelsSensor::RunTick(Wheels& in, Eigen::Vector3d& /*trans*/, Eigen::Vector3d& /*rot*/, double time)
 {
     if (this->sampleReady(time))
     {

@@ -46,6 +46,7 @@ Wheels gripMap::getGripValues(std::array<Eigen::Vector3d, 4> in)
     ret.FR = this->total_scale * temp[1];
     ret.RL = this->total_scale * temp[2];
     ret.RR = this->total_scale * temp[3];
+    ret.timestamp = 0.0;
 
     return ret;
 }
@@ -55,7 +56,7 @@ void gripMap::transformPoints(Eigen::Vector3d trans, Eigen::Vector3d rot)
     Eigen::Matrix3d rotationMatrix = eulerAnglesToRotMat(rot);
     Eigen::Vector3d transInverse = inverseTranslation(trans, rot);
 
-    for (int i = 0; i < this->mapPoints.size(); ++i)
+    for (std::size_t i = 0; i < this->mapPoints.size(); ++i)
     {
         this->mapPoints[i].first = rotationMatrix * this->mapPoints[i].first;
         this->mapPoints[i].first += transInverse;
