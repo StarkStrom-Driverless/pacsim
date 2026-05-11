@@ -87,6 +87,7 @@ public:
     void setRpmSetpoints(Wheels in) override {
         this->rpmSetpoints = in;
         this->hasRpmSetpoint_ = true;
+        this->rpmCommandAgeS_ = 0.0;
     }
     void setMinTorques(Wheels in) override { this->minTorques = in; }
 
@@ -103,6 +104,7 @@ public:
         // Interpret command as longitudinal force in Newton from upstream controller.
         targetLongitudinalForceN_ = in;
         hasLongitudinalForceCommand_ = true;
+        forceCommandAgeS_ = 0.0;
     }
     void setPosition(Eigen::Vector3d position) override {
         this->position = position;
@@ -172,11 +174,26 @@ public:
         this->wheelOrientations.RL = std::fmod(this->wheelOrientations.RL + dtheta, 2.0 * M_PI);
         this->wheelOrientations.RR = std::fmod(this->wheelOrientations.RR + dtheta, 2.0 * M_PI);
 
-        // Consume the force/rpm commands so that a stalled upstream publisher does not keep
-        // applying the same setpoint indefinitely. The next tick falls back to legacy/velocity
-        // paths unless a new command has been received in the meantime.
-        hasLongitudinalForceCommand_ = false;
-        hasRpmSetpoint_ = false;
+        // Keep the last force/rpm setpoints sticky so that PacSim ticks faster than the
+        // upstream controller (e.g. 200 Hz sim vs 40 Hz MPC) do not fall back to the
+        // velocity-PI brake-to-zero path between commands. Drop the command only after a
+        // staleness timeout indicating the upstream publisher really stopped.
+        constexpr double kCommandStaleTimeoutS = 0.2;
+        if (hasLongitudinalForceCommand_) {
+            forceCommandAgeS_ += dt;
+            if (forceCommandAgeS_ > kCommandStaleTimeoutS) {
+                hasLongitudinalForceCommand_ = false;
+                targetLongitudinalForceN_ = 0.0;
+                forceCommandAgeS_ = 0.0;
+            }
+        }
+        if (hasRpmSetpoint_) {
+            rpmCommandAgeS_ += dt;
+            if (rpmCommandAgeS_ > kCommandStaleTimeoutS) {
+                hasRpmSetpoint_ = false;
+                rpmCommandAgeS_ = 0.0;
+            }
+        }
     }
 
 private:
@@ -207,6 +224,8 @@ private:
     double targetLongitudinalForceN_{0.0};
     bool hasLongitudinalForceCommand_{false};
     bool hasRpmSetpoint_{false};
+    double forceCommandAgeS_{0.0};
+    double rpmCommandAgeS_{0.0};
     Wheels minTorques{ -0.0, -0.0, -0.0, -0.0, 0.0 };
     Wheels maxTorques{ 0.0, 0.0, 0.0, 0.0, 0.0 };
     Wheels rpmSetpoints{ 0.0, 0.0, 0.0, 0.0, 0.0 };
