@@ -8,7 +8,7 @@ To use PacSim, you need to create a message converter node to match your own int
 | TOPIC                        | MESSAGE TYPE               | DESCRIPTION                                                                           | USED WITH DEFAULT MODEL?  |
 |------------------------------|----------------------------|---------------------------------------------------------------------------------------|---|
 | /pacsim/steering_setpoint    | pacsim::msg::StampedScalar | Target steering angle at the steering wheel/sensor (rad)                              | YES |
-| /pacsim/powerground_setpoint | pacsim::msg::StampedScalar | Powered ground multiplier. 0 for no powered aero, 1 for full capacity (Dimensionless) | YES |
+| /pacsim/powerground_setpoint | pacsim::msg::StampedScalar | Longitudinal force command (N) | YES |
 | /pacsim/wheelspeed_setpoints | pacsim::msg::Wheels        | Target wheel speeds at each wheel's motor (RPM)                                       | NO |
 | /pacsim/torques_min          | pacsim::msg::Wheels        | Lower bound torque value at each wheel's motor (Nm)                                   | NO |
 | /pacsim/torques_max          | pacsim::msg::Wheels        | Upper bound torque value at each wheel's motor (Nm)                                   | YES |

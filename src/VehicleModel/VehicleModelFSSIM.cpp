@@ -13,10 +13,10 @@ class VehicleModelFSSIM : public IVehicleModel {
 public:
     VehicleModelFSSIM() {
         // Reasonable defaults (kept minimal)
-        this->torques = {0.0, 0.0, 0.0, 0.0};
-        this->steeringAngles = {0.0, 0.0, 0.0, 0.0};
-        this->wheelOrientations = {0.0, 0.0, 0.0, 0.0};
-        this->wheelspeeds = {0.0, 0.0, 0.0, 0.0};
+        this->torques = {0.0, 0.0, 0.0, 0.0, 0.0};
+        this->steeringAngles = {0.0, 0.0, 0.0, 0.0, 0.0};
+        this->wheelOrientations = {0.0, 0.0, 0.0, 0.0, 0.0};
+        this->wheelspeeds = {0.0, 0.0, 0.0, 0.0, 0.0};
 
         wheelRadius = 0.206;
         gearRatio = 12.0;
@@ -84,7 +84,10 @@ public:
 
     // Setters / inputs
     void setTorques(Wheels in) override { this->torques = in; }
-    void setRpmSetpoints(Wheels in) override { this->rpmSetpoints = in; }
+    void setRpmSetpoints(Wheels in) override {
+        this->rpmSetpoints = in;
+        this->hasRpmSetpoint_ = true;
+    }
     void setMinTorques(Wheels in) override { this->minTorques = in; }
 
     void setMaxTorques(Wheels in) override { this->maxTorques = in; }
@@ -126,15 +129,17 @@ public:
             fssim_dc_ = std::clamp(
                 targetLongitudinalForceN_ / std::max(kCmdEps, params.driveTrain.cm1), -1.0, 1.0);
 
-            // Optional safety: if an MPC target velocity is provided via rpm setpoints,
-            // do not keep accelerating once we are above that target.
-            double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
-            double omega = rpm_avg * 2.0 * M_PI / 60.0;
-            double v_target = (omega * wheelRadius) / std::max(kCmdEps, gearRatio);
-            if (v_target > kCmdEps) {
-                const double v_current = fssim_.getState().v.x();
-                if (v_current > v_target && fssim_dc_ > 0.0) {
-                    fssim_dc_ = 0.0;
+            // Optional safety: only apply rpm cap when the upstream actually provided rpm setpoints
+            // (avoids accidental zeroing when rpmSetpoints are still at their default of 0).
+            if (hasRpmSetpoint_) {
+                double rpm_avg = 0.25 * (rpmSetpoints.FL + rpmSetpoints.FR + rpmSetpoints.RL + rpmSetpoints.RR);
+                double omega = rpm_avg * 2.0 * M_PI / 60.0;
+                double v_target = (omega * wheelRadius) / std::max(kCmdEps, gearRatio);
+                if (v_target > kCmdEps) {
+                    const double v_current = fssim_.getState().v.x();
+                    if (v_current > v_target && fssim_dc_ > 0.0) {
+                        fssim_dc_ = 0.0;
+                    }
                 }
             }
         } else if (std::abs(total_max_torque) > kCmdEps) {
@@ -158,7 +163,7 @@ public:
 
         // Wheelspeeds: approximate from body x velocity and gear ratio
         double rpm = (s.v.x() / (wheelRadius * 2.0 * M_PI)) * 60.0 * gearRatio;
-        this->wheelspeeds = {rpm, rpm, rpm, rpm};
+        this->wheelspeeds = {rpm, rpm, rpm, rpm, 0.0};
 
         // Wheel orientations integrate trivially from wheelspeeds
         double dtheta = (rpm / (60.0 * gearRatio)) * dt * 2.0 * M_PI;
@@ -166,6 +171,12 @@ public:
         this->wheelOrientations.FR = std::fmod(this->wheelOrientations.FR + dtheta, 2.0 * M_PI);
         this->wheelOrientations.RL = std::fmod(this->wheelOrientations.RL + dtheta, 2.0 * M_PI);
         this->wheelOrientations.RR = std::fmod(this->wheelOrientations.RR + dtheta, 2.0 * M_PI);
+
+        // Consume the force/rpm commands so that a stalled upstream publisher does not keep
+        // applying the same setpoint indefinitely. The next tick falls back to legacy/velocity
+        // paths unless a new command has been received in the meantime.
+        hasLongitudinalForceCommand_ = false;
+        hasRpmSetpoint_ = false;
     }
 
 private:
@@ -195,9 +206,10 @@ private:
     double gravityFactor_{1.0};
     double targetLongitudinalForceN_{0.0};
     bool hasLongitudinalForceCommand_{false};
-    Wheels minTorques{ -0.0, -0.0, -0.0, -0.0 };
-    Wheels maxTorques{ 0.0, 0.0, 0.0, 0.0 };
-    Wheels rpmSetpoints{ 0.0, 0.0, 0.0, 0.0 };
+    bool hasRpmSetpoint_{false};
+    Wheels minTorques{ -0.0, -0.0, -0.0, -0.0, 0.0 };
+    Wheels maxTorques{ 0.0, 0.0, 0.0, 0.0, 0.0 };
+    Wheels rpmSetpoints{ 0.0, 0.0, 0.0, 0.0, 0.0 };
     FSSIMVehicleModel::State last_state_{};
     double last_dt_{0.0};
     

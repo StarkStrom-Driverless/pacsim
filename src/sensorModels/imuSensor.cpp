@@ -26,7 +26,7 @@ void ImuSensor::readConfig(ConfigElement& config)
     this->orientation = Eigen::Vector3d(orientation[0], orientation[1], orientation[2]);
 }
 
-bool ImuSensor::RunTick(ImuData& in, Eigen::Vector3d& alpha, double time)
+bool ImuSensor::RunTick(ImuData& in, Eigen::Vector3d& /*alpha*/, double time)
 {
     // TODO rigid body tranform of accleration
     if (this->sampleReady(time))

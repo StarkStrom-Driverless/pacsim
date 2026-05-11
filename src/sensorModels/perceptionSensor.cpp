@@ -203,8 +203,6 @@ std::vector<Landmark> PerceptionSensor::addNoise(std::vector<Landmark>& in)
 std::vector<Landmark> PerceptionSensor::addClassProbailities(std::vector<Landmark>& in)
 {
     std::vector<Landmark> listNew;
-    bool detect_big_orange = true;
-    bool detect_timekeeping = true;
     std::default_random_engine random_generator(this->numFrames);
     std::uniform_real_distribution<double> unif(0, 1.0);
 

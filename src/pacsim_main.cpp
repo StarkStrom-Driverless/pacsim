@@ -171,8 +171,6 @@ int threadMainLoopFunc(std::shared_ptr<rclcpp::Node> node)
     deadTimeMinTorques = DeadTime<Wheels>(0.02);
     deadTimePowerGroundSetpoint = DeadTime<double>(0.05);
 
-    double current_wheel_speed_angle = 0.0;
-
     auto nextLoopTime = std::chrono::steady_clock::now();
 
     cl = std::make_shared<CompetitionLogic>(logger, lms, mainConfig);
@@ -394,7 +392,7 @@ void cbFuncLat(const pacsim::msg::StampedScalar& msg)
 void cbFuncTorquesInverterMin(const pacsim::msg::Wheels& msg)
 {
     std::lock_guard<std::mutex> l(mutexSimTime);
-    Wheels min;
+    Wheels min { 0.0, 0.0, 0.0, 0.0, simTime };
     min.FL = msg.fl;
     min.FR = msg.fr;
     min.RL = msg.rl;
@@ -405,7 +403,7 @@ void cbFuncTorquesInverterMin(const pacsim::msg::Wheels& msg)
 void cbFuncTorquesInverterMax(const pacsim::msg::Wheels& msg)
 {
     std::lock_guard<std::mutex> l(mutexSimTime);
-    Wheels max;
+    Wheels max { 0.0, 0.0, 0.0, 0.0, simTime };
     max.FL = msg.fl;
     max.FR = msg.fr;
     max.RL = msg.rl;
@@ -416,7 +414,7 @@ void cbFuncTorquesInverterMax(const pacsim::msg::Wheels& msg)
 void cbWheelspeeds(const pacsim::msg::Wheels& msg)
 {
     std::lock_guard<std::mutex> l(mutexSimTime);
-    Wheels w { msg.fl, msg.fr, msg.rl, msg.rr };
+    Wheels w { msg.fl, msg.fr, msg.rl, msg.rr, simTime };
     deadTimeWspdSetpoints.addVal(w, simTime);
 }
 
@@ -426,8 +424,8 @@ void cbPowerGround(const pacsim::msg::StampedScalar& msg)
     deadTimePowerGroundSetpoint.addVal(msg.value, simTime);
 }
 
-void cbFinishSignal(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-    std::shared_ptr<std_srvs::srv::Empty::Response> response)
+void cbFinishSignal(const std::shared_ptr<std_srvs::srv::Empty::Request> /*request*/,
+    std::shared_ptr<std_srvs::srv::Empty::Response> /*response*/)
 {
     cl->setFinish(true);
 }

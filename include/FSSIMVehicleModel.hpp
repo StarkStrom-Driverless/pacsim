@@ -163,8 +163,8 @@ public:
 
     // Integrates dynamics given dc (throttle), delta (steer), and time step dt [s]
     const State& step(double dc, double delta, double dt) {
-        // First-order steering actuator model (simple low-pass)
-        const double T_sample   = 0.1;
+        // First-order steering actuator model (simple low-pass) using actual integration step dt
+        const double T_sample   = std::max(1e-6, dt);
         const double T_steering = 0.145;
         input_.delta = (T_sample / (T_steering + T_sample)) * delta
                      + (T_steering / (T_steering + T_sample)) * old_delta_;

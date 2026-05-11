@@ -13,10 +13,10 @@ public:
         this->angularVelocity = Eigen::Vector3d(0.0, 0.0, 0.0);
         this->acceleration = Eigen::Vector3d(0.0, 0.0, 0.0);
 
-        this->torques = { 0.0, 0.0, 0.0, 0.0 };
-        this->steeringAngles = { 0.0, 0.0, 0.0, 0.0 };
-        this->wheelOrientations = { 0.0, 0.0, 0.0, 0.0 };
-        this->wheelspeeds = { 0.0, 0.0, 0.0, 0.0 };
+        this->torques = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+        this->steeringAngles = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+        this->wheelOrientations = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+        this->wheelspeeds = { 0.0, 0.0, 0.0, 0.0, 0.0 };
     }
 
     bool readConfig(ConfigElement& config)
@@ -114,13 +114,12 @@ public:
 
     void setSteeringSetpointFront(double in) { setSteeringFront(in); }
 
-    void setSteeringSetpointRear(double in) { return; }
+    void setSteeringSetpointRear(double /*in*/) { return; }
 
     void setPowerGroundSetpoint(double in) { this->powerGroundSetpoint = std::min(std::max(in, 0.0), 1.0); }
 
     void setSteeringFront(double in)
     {
-        double avgRatio = 0.5 * (this->innerSteeringRatio + this->outerSteeringRatio);
         if (in > 0)
         {
             this->steeringAngles.FL = this->innerSteeringRatio * in;
@@ -143,14 +142,10 @@ public:
     }
 
     // ax, ay, rdot
-    Eigen::Vector3d getDynamicStates(double dt, Wheels frictionCoefficients)
+    Eigen::Vector3d getDynamicStates(double /*dt*/, Wheels frictionCoefficients)
     {
         double l = this->lr + this->lf;
         double vx = this->velocity.x();
-        double vy = this->velocity.y();
-        double ax = this->acceleration.x();
-        double ay = this->acceleration.y();
-        double r = this->angularVelocity.z();
         // Downforce
         double F_aero_downforce
             = 0.5 * 1.29 * this->aeroArea * this->cla * (vx * vx) + this->powerGroundSetpoint * this->powerGroundForce;
@@ -306,9 +301,9 @@ private:
     double powerGroundForce = 700.0;
     double powertrainEfficiency = 1.0;
 
-    Wheels minTorques = { -0.0, -0.0, -0.0, -0.0 };
-    Wheels maxTorques = { 0.0, 0.0, 0.0, 0.0 };
-    Wheels rpmSetpoints = { 0.0, 0.0, 0.0, 0.0 };
-    Wheels currentFx = { 0.0, 0.0, 0.0, 0.0 };
-    Wheels currentFy = { 0.0, 0.0, 0.0, 0.0 };
+    Wheels minTorques = { -0.0, -0.0, -0.0, -0.0, 0.0 };
+    Wheels maxTorques = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+    Wheels rpmSetpoints = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+    Wheels currentFx = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+    Wheels currentFy = { 0.0, 0.0, 0.0, 0.0, 0.0 };
 };

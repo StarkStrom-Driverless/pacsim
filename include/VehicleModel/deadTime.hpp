@@ -43,7 +43,6 @@ public:
         std::lock_guard<std::mutex> l(_mutex);
         if (this->deadTimeQueue.size() >= 1)
         {
-            T elem = this->deadTimeQueue.front();
             if (time >= (this->times.front() + this->deadTime))
             {
                 ret = true;
